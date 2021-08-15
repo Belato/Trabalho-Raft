@@ -37,19 +37,36 @@ type ApplyMsg struct {
 	Snapshot    []byte // ignore for lab2; only used in lab3
 }
 
+type LogEntry struct {
+	Command		interface{}
+	term		int
+}
+
 //
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	mu        sync.Mutex          // Lock to protect shared access to this peer's state
-	peers     []*labrpc.ClientEnd // RPC end points of all peers
-	persister *Persister          // Object to hold this peer's persisted state
-	me        int                 // this peer's index into peers[]
+	mu        		sync.Mutex          // Lock to protect shared access to this peer's state
+	peers     		[]*labrpc.ClientEnd // RPC end points of all peers
+	persister 		*Persister          // Object to hold this peer's persisted state
+	me        		int                 // this peer's index into peers[]
 
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	// Persistent state on all servers:
+	currentTerm 	int // latest term server has seen
+	votedFor		int // candidateId that received vote in current term
+	logEntries      []*LogEntry // each entry contains command for state machine, and term when entry was received by leader
+	
+	// Volatile state on all servers:
+	commitIndex		int // index of highest log entry known to be committed
+	lastApplied		int // index of highest log entry applied to state machine 
+
+	// Volatile state on leaders
+	nextIndex		int // for each server, index of the next log entry to send to that server
+	matchIndex		int // for each server, index of highest log entry known to be replicated on server
 }
 
 // return currentTerm and whether this server
@@ -94,14 +111,16 @@ func (rf *Raft) readPersist(data []byte) {
 }
 
 
-
-
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	CanditadeTerm	int
+	CandidateId		int
+	LastLogIndex	int
+	LastLogTerm		int
 }
 
 //
@@ -110,6 +129,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	CurrentTerm		int
+	VoteGranted		bool
 }
 
 //
@@ -117,6 +138,7 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	
 }
 
 //
