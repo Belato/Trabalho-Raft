@@ -19,7 +19,9 @@ package raft
 
 import (
 	"labrpc"
+	"math/rand"
 	"sync"
+	"time"
 )
 
 // import "bytes"
@@ -58,17 +60,17 @@ type Raft struct {
 	state RaftState
 
 	// Persistent state on all servers:
-	currentTerm int         // latest term server has seen
-	votedFor    int         // candidateId that received vote in current term
-	logEntries  []*LogEntry // each entry contains command for state machine, and term when entry was received by leader
+	currentTerm int        // latest term server has seen
+	votedFor    int        // candidateId that received vote in current term
+	logEntries  []LogEntry // each entry contains command for state machine, and term when entry was received by leader
 
 	// Volatile state on all servers:
 	commitIndex int // index of highest log entry known to be committed
 	lastApplied int // index of highest log entry applied to state machine
 
 	// Volatile state on leaders
-	nextIndex  int // for each server, index of the next log entry to send to that server
-	matchIndex int // for each server, index of highest log entry known to be replicated on server
+	nextIndex  []int // for each server, index of the next log entry to send to that server
+	matchIndex []int // for each server, index of highest log entry known to be replicated on server
 }
 
 type RaftState int
@@ -185,7 +187,7 @@ type AppendEntriesArgs struct {
 	PrevLogIndex int
 	PrevLogTerm  int
 
-	Entries      []*LogEntry
+	Entries      []LogEntry
 	LeaderCommit int
 }
 
@@ -344,9 +346,85 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
-
+	rf.state = Follower
+	rf.commitIndex = 0
+	rf.votedFor = -1
+	rf.currentTerm = 0
+	rf.logEntries = []LogEntry{}
+	rf.logEntries = append(rf.logEntries, LogEntry{Command: rf.currentTerm, term: -1})
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+
+	go func() {
+		for {
+			rf.mu.Lock()
+
+			for rf.commitIndex > rf.lastApplied {
+				rf.lastApplied = rf.lastApplied + 1
+			}
+			rf.mu.Unlock()
+			time.Sleep((50 * time.Millisecond))
+		}
+	}()
+
+	go func() {
+		for {
+			rf.mu.Lock()
+			if rf.state == Follower {
+				rf.state = Candidate
+			}
+			rf.mu.Unlock()
+
+			duration := time.Duration(350 + rand.Intn(100-(-100)+100))
+			time.Sleep(duration * time.Millisecond)
+
+			rf.mu.Lock()
+
+			if rf.state == Candidate {
+				c := 0
+				logLength := len(rf.logEntries)
+
+				lastTerm := 0
+				lastIndex := logLength - 1
+				requestTerm := rf.currentTerm + 1
+
+				if logLength > 0 {
+					lastTerm = rf.logEntries[logLength-1].term
+				}
+
+				rvArgs := RequestVoteArgs{requestTerm, rf.me, lastIndex, lastTerm}
+				rvReplies := make([]RequestVoteReply, len(rf.peers))
+
+				for index := range rf.peers {
+					go func(index int) {
+						ok := rf.sendRequestVote(index, &rvArgs, &rvReplies[index])
+						rf.mu.Lock()
+						if rvReplies[index].CurrentTerm > rf.currentTerm {
+							rf.currentTerm = rvReplies[index].CurrentTerm
+							rf.state = Follower
+						} else if ok && rvArgs.CandidateTerm == rf.currentTerm && rvReplies[index].VoteGranted {
+							c++
+							if c > len(rf.peers)/2 && rf.state != Leader {
+								rf.state = Leader
+								rf.currentTerm = requestTerm
+								rf.nextIndex = make([]int, len(rf.peers))
+								rf.matchIndex = make([]int, len(rf.peers))
+
+								for i := range rf.peers {
+									rf.nextIndex[i] = len(rf.logEntries)
+								}
+
+							}
+						}
+						rf.mu.Unlock()
+					}(index)
+				}
+			}
+
+		}
+
+		rf.mu.Unlock()
+	}()
 
 	return rf
 }
