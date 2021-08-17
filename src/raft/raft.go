@@ -198,7 +198,64 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) ApprendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	if args.Term > rf.currentTerm {
+		rf.state = Follower
+		rf.currentTerm = args.Term
+		rf.votedFor = -1
+	}
+	reply.Success = false
 
+	if args.Term == rf.currentTerm {
+		if rf.state != Follower {
+			rf.state = Follower
+			rf.currentTerm = args.Term
+			rf.votedFor = -1
+		}
+
+		if args.PrevLogIndex == -1 || (args.PrevLogIndex < len(rf.logEntries) && args.PrevLogTerm == rf.logEntries[args.PrevLogIndex].term) {
+			reply.Success = true
+
+			logInsertIndex := args.PrevLogIndex + 1
+			newEntriesIndex := 0
+
+			for !((logInsertIndex >= len(rf.logEntries) || newEntriesIndex >= len(args.Entries)) || (rf.logEntries[logInsertIndex].term != args.Entries[newEntriesIndex].term)) {
+				logInsertIndex++
+				newEntriesIndex++
+			}
+
+			if newEntriesIndex < len(args.Entries) {
+				rf.logEntries = append(rf.logEntries[:logInsertIndex], args.Entries[newEntriesIndex:]...)
+			}
+
+			if args.LeaderCommit > rf.commitIndex {
+				if args.LeaderCommit > len(rf.logEntries)-1 {
+					rf.commitIndex = len(rf.logEntries) - 1
+				} else {
+					rf.commitIndex = args.LeaderCommit
+				}
+			}
+		} else {
+			if args.PrevLogIndex >= len(rf.logEntries) {
+				reply.ConflictIndex = len(rf.logEntries)
+				reply.ConflictTerm = -1
+			} else {
+				reply.ConflictTerm = rf.logEntries[args.PrevLogIndex].term
+
+				index := args.PrevLogIndex
+
+				for index >= 0 && rf.logEntries[index].term == reply.ConflictTerm {
+					index--
+				}
+
+				reply.ConflictTerm = index + 1
+			}
+		}
+
+	}
+
+	reply.Term = rf.currentTerm
+	rf.mu.Unlock()
 }
 
 //
