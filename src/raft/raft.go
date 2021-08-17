@@ -17,13 +17,13 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "labrpc"
+import (
+	"labrpc"
+	"sync"
+)
 
 // import "bytes"
 // import "encoding/gob"
-
-
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -38,36 +38,49 @@ type ApplyMsg struct {
 }
 
 type LogEntry struct {
-	Command		interface{}
-	term		int
+	Command interface{}
+	term    int
 }
 
 //
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	mu        		sync.Mutex          // Lock to protect shared access to this peer's state
-	peers     		[]*labrpc.ClientEnd // RPC end points of all peers
-	persister 		*Persister          // Object to hold this peer's persisted state
-	me        		int                 // this peer's index into peers[]
+	mu        sync.Mutex          // Lock to protect shared access to this peer's state
+	peers     []*labrpc.ClientEnd // RPC end points of all peers
+	persister *Persister          // Object to hold this peer's persisted state
+	me        int                 // this peer's index into peers[]
 
-	// Your data here (2A, 2B, 2C).
+	// Your data here (2/A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	state RaftState
+
 	// Persistent state on all servers:
-	currentTerm 	int // latest term server has seen
-	votedFor		int // candidateId that received vote in current term
-	logEntries      []*LogEntry // each entry contains command for state machine, and term when entry was received by leader
-	
+	currentTerm int         // latest term server has seen
+	votedFor    int         // candidateId that received vote in current term
+	logEntries  []*LogEntry // each entry contains command for state machine, and term when entry was received by leader
+
 	// Volatile state on all servers:
-	commitIndex		int // index of highest log entry known to be committed
-	lastApplied		int // index of highest log entry applied to state machine 
+	commitIndex int // index of highest log entry known to be committed
+	lastApplied int // index of highest log entry applied to state machine
 
 	// Volatile state on leaders
-	nextIndex		int // for each server, index of the next log entry to send to that server
-	matchIndex		int // for each server, index of highest log entry known to be replicated on server
+	nextIndex  int // for each server, index of the next log entry to send to that server
+	matchIndex int // for each server, index of highest log entry known to be replicated on server
 }
+
+type Persister struct {
+}
+
+type RaftState int
+
+const (
+	Follower RaftState = iota
+	Candidate
+	Leader
+)
 
 // return currentTerm and whether this server
 // believes it is the leader.
@@ -75,7 +88,11 @@ func (rf *Raft) GetState() (int, bool) {
 
 	var term int
 	var isleader bool
-	// Your code here (2A).
+	// Your code here (2/A).
+	rf.mu.Lock()
+	term = rf.currentTerm
+	isleader = rf.state == Leader
+	rf.mu.Unlock()
 	return term, isleader
 }
 
@@ -110,17 +127,16 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 }
 
-
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).
-	CandidateTerm	int
-	CandidateId		int
-	LastLogIndex	int
-	LastLogTerm		int
+	// Your data here (2/A, 2B).
+	CandidateTerm int
+	CandidateId   int
+	LastLogIndex  int
+	LastLogTerm   int
 }
 
 //
@@ -128,9 +144,9 @@ type RequestVoteArgs struct {
 // field names must start with capital letters!
 //
 type RequestVoteReply struct {
-	// Your data here (2A).
-	CurrentTerm		int
-	VoteGranted		bool
+	// Your data here (2/A).
+	CurrentTerm int
+	VoteGranted bool
 }
 
 //
@@ -138,10 +154,31 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	if rf.currentTerm < args.CandidateTerm:
+	rf.mu.Lock()
+
+	logLength := len(rf.logEntries)
+	lastLogTerm := -1
+	lastLogIndex := -1
+	if logLength > 0 {
+		lastLogIndex = len(rf.logEntries) - 1
+		lastLogTerm = rf.logEntries[lastLogIndex].term
+	}
+
+	if rf.currentTerm < args.CandidateTerm {
 		reply.VoteGranted = false
-	else if (rf.votedFor == nil || rf.votedFor == args.CandidateId) && args.LastLogTerm == rf.logEntries[LastLogIndex].term:
+		rf.state = Follower
+	}
+	if rf.currentTerm == args.CandidateTerm &&
+		(rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
+		(args.LastLogTerm > lastLogTerm || (args.LastLogTerm == lastLogIndex && args.LastLogIndex >= lastLogIndex)) {
 		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
+	} else {
+		reply.VoteGranted = false
+	}
+	reply.CurrentTerm = rf.currentTerm
+	rf.mu.Unlock()
+
 }
 
 //
@@ -178,7 +215,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -198,7 +234,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
-
 
 	return index, term, isLeader
 }
@@ -235,7 +270,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
 
 	return rf
 }
