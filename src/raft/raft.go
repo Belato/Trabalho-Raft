@@ -71,9 +71,6 @@ type Raft struct {
 	matchIndex int // for each server, index of highest log entry known to be replicated on server
 }
 
-type Persister struct {
-}
-
 type RaftState int
 
 const (
@@ -178,6 +175,29 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 	reply.CurrentTerm = rf.currentTerm
 	rf.mu.Unlock()
+
+}
+
+type AppendEntriesArgs struct {
+	Term     int
+	LeaderId int
+
+	PrevLogIndex int
+	PrevLogTerm  int
+
+	Entries      []*LogEntry
+	LeaderCommit int
+}
+
+type AppendEntriesReply struct {
+	Term    int
+	Success bool
+
+	ConflictIndex int
+	ConflictTerm  int
+}
+
+func (rf *Raft) ApprendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 
 }
 
